@@ -33,7 +33,7 @@ typedef struct {
  *
  * returns zero if parsing was succesful, errorcode otherwise
  */
-uint8_t parse(char* buffer, parseresult* result);
+uint8_t hex_parse(char* buffer, parseresult* result);
 
 
 

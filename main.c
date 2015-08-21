@@ -21,20 +21,25 @@
 #include <util/twi.h>
 #include <avr/eeprom.h>
 #include "io/uart.h"
+#include "hex_parse.h"
+
+#include <stdio.h>
 
 /**
  * CONFIGURATION----------------------
  */
-#define DEBUG
+#define DEBUG 1
 #define FIRMWARE_UPDATE_COMMAND 0xAA
 #define INTEL_HEX_MAX_LINE_LENGTH 46
+
+#define TIMER_ROUNDTRIPS_SECOND ((F_CPU/1024)/255)
 
 
 /**
  * Global variables
  */
 volatile uint8_t device_address = 0x00;
-
+volatile uint8_t timeout_counter = TIMER_ROUNDTRIPS_SECOND;
 
 /**
  * Jumps to 0x000 and therefore executes application software
@@ -44,30 +49,24 @@ void start_application(void){
 	uint8_t temp = MCUCR;
 	MCUCR = temp &~(1<<IVCE);
 	MCUCR = temp &~(1<<IVSEL);
-	//jumb to beginning of flash
+
+	//deactivate I2C
+	TWAR = 0x00;
+	TWCR = 0x00;
+
+	_delay_ms(100);
+	//jump to beginning of flash
 	asm volatile ("jmp 0x000");
 }
 
-/*
- * Takes an ascii pair and converts it to a byte
- */
-uint8_t ascii_byte_parse(const char* a){
-	uint8_t i, t, result = 0;
-	for(i=0; i<2; i++){
-		t = a[i];
-		if(t >= '0' && t <= '9'){
-			t = t-60;
-		}
-		else if(t >= 'a' && t <= 'f'){
-			t = t-87;
-		}
-		else if(t >= 'A' && t <= 'F'){
-			t= t-55;
-		}
-		result = (result<<4)+t;
-	}
-	return result;
+
+void set_timeout(){
+	OCR0A = 0xFF; //set upper border for the counter
+	TCCR0A |= (1<<WGM01);
+	TCCR0B = (1<<CS00)|(1<<CS02); //enable prescaler 1024 and ctc mode
+	TIMSK0 |= (1<<OCIE0A); //enable timer compare Interrupt
 }
+
 
 /**
  * Writes a page to memory
@@ -121,35 +120,121 @@ int main(){
 	MCUCR = temp | (1<<IVCE);
 	MCUCR = temp | (1<<IVSEL);
 
-#ifdef DEBUG
+#if DEBUG
 	uart_init(9600);
 	uart_send("millionboot loaded.. \r\n");
 	sei();
 #endif
 
 	//load device address from eeprom
-	device_address = eeprom_read_byte (0x00);
+	device_address = eeprom_read_byte(0x00);
 
 	//configure i2c in slave mode
 	TWAR = (device_address << 1)| (1<<TWGCE);
 	TWCR = (1<<TWEA)|(1<<TWEN);
-
-	//wait a sec
-	_delay_ms(1000);
-
-	//check if there was a general call firmware upgrade request on bus
-	if((TWCR & (1<<TWINT)) && TWSR == TW_SR_GCALL_DATA_ACK){
-		TWCR &= ~(1<<TWINT);
-		if(TWDR == FIRMWARE_UPDATE_COMMAND){
-			//wait for beginning of first line
-			while(!(TWCR & (1<<TWINT)) && TWSR == TW_SR_DATA_ACK);
+	TWCR &= ~(1<<TWINT);
 
 
+	//set timeout
+	set_timeout();
+
+	//check if there is something on I2C or timeout expires
+	while(!(TWCR & (1<<TWINT))){
+		if(timeout_counter <= 0){
+#if DEBUG
+			uart_send("No data on I2C. Exiting.. \r\n");
+#endif
+			start_application();
+		}
+	}
+	if(!(TWSR == TW_SR_GCALL_ACK)){
+#if DEBUG
+		uart_send("No general call on I2C. Exiting..  \r\n");
+#endif
+		TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWSTO)|(1<<TWEA);
+		start_application();
+	}
+
+	//request next
+	TWCR |= (1<<TWINT);
+
+
+	//wait for data, or timeout
+	while(!(TWCR & (1<<TWINT))){
+		if(timeout_counter <= 0){
+#if DEBUG
+			uart_send("No command byte on I2C. Exiting.. \r\n");
+#endif
+			TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWSTO)|(1<<TWEA);
+			start_application();
 		}
 	}
 
+	if(!(TWSR == TW_SR_GCALL_DATA_ACK) || TWDR != FIRMWARE_UPDATE_COMMAND){
+#if DEBUG
+		uart_send("Wrong command byte. Exiting.. \r\n");
+#endif
+		TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWSTO)|(1<<TWEA);
+		start_application();
+	}
 
-	//we either don't want to update or we succesfully updated aplication software
-	start_application();
+	TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWSTO)|(1<<TWEA);
 
+	/**
+	 * Entered firmware upgrade mode
+	 */
+#if DEBUG
+	uart_send("entered firmware update mode.. \r\n");
+#endif
+	TWAR &= ~(1<<TWGCE);	//disable general call
+
+	uint8_t upgrade_finished = 0;
+	while(!upgrade_finished){
+		//wait for beginning of next line transmission
+		TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWSTO)|(1<<TWEA);
+		while(!(TWCR & (1<<TWINT)));
+		if(TWSR != TW_SR_SLA_ACK){
+			TWCR = (1<<TWINT)|(1<<TWEN);
+			continue;
+		}
+
+		//receive line
+		uint8_t i;
+		for(i=0; i<INTEL_HEX_MAX_LINE_LENGTH-1; i++){
+			while(!(TWCR & (1<<TWINT)));
+			if(TWSR == TW_SR_DATA_ACK){
+				hex_receive_buffer[i] = TWDR;
+				if(hex_receive_buffer[i] == '\r')
+					TWCR = (1<<TWINT)|(1<<TWEN);
+				else
+					TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWEA);
+			}
+			//revieved whole line
+			if(TWSR == TW_SR_DATA_NACK){
+				break;
+			}
+		}
+
+		uart_send(hex_receive_buffer);
+		uart_send("\r\n");
+
+
+
+	}
+
+	while(1);
 }
+
+/*
+ * Timeout occured -> switch to normal application
+ */
+ISR(TIMER0_COMPA_vect)
+	{
+		if(timeout_counter > 0)
+			timeout_counter--;
+		else
+		{
+			TIMSK0 &= ~(1<<OCIE0A); //disable compare interrupt
+			TCCR0B = 0x00;			//disable timer 0
+		}
+	}
