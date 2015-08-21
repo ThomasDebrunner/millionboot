@@ -21,7 +21,7 @@ Once the bootloader has entered firmware upgrade mode it **no longer respects ge
 
 The bootloader accepts the **intel hex format** with a maximum line length of 45 characters, every line has to start with `:`and end with `\r\n`. The first byte is interpreted as the payload length, the following two bytes as the destination (byte) address followed by 1 byte operation code, payload and a 1 byte checksum.
 
-All lines of the hex file have to be transmitted serially over I2C, one line a transmission. The bootloader can take at most **45 bytes** per transmission. A `IC NACK` gets send on the byte after `\r` (usually `\n`).
+All lines of the hex file have to be transmitted serially over I2C, one line a transmission. The bootloader can take at most **45 bytes** per transmission.
 After that, no further actions on the bus are Acknowledged until the hex file is succesfully checked and programmed.
 
 It is suggested that the sender polls the bootloader with read inquiries, until the bootloader acknowledges again. The bootloader returns a byte that can contain the following:

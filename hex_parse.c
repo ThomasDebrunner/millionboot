@@ -5,9 +5,7 @@
  *      Author: najiji
  */
 
-
 #include "hex_parse.h"
-#include <stdint.h>
 
 
 /*
@@ -32,7 +30,7 @@ uint8_t ascii_byte_parse(const char* a){
 }
 
 
-uint8_t hex_parse(char* buffer, parseresult* result) {
+uint8_t hex_parse(char* buffer, Parseresult* result) {
 
 	char* position = buffer;
 	uint8_t checksum = 0x00;
@@ -81,6 +79,36 @@ uint8_t hex_parse(char* buffer, parseresult* result) {
 	//check if we are at end of file
 	if(*position != '\r')
 		return MALFORMATED;
+
+	return 0;
+}
+
+
+
+uint8_t page_append(Parseresult* parsed_data, Page* page){
+	if(parsed_data->operation == 0){
+		uint16_t page_address = parsed_data->address - parsed_data->address % SPM_PAGESIZE;
+		if(page->address == 0xFFFF){ // no address specified yet
+			page->address = page_address;
+		}
+		else if(page->address != page_address)
+			return WRONG_PAGE;
+
+		if(SPM_PAGESIZE-1-page->position < parsed_data->size)
+			return PAGE_FULL;
+
+		uint8_t i;
+		for(i=0; i<parsed_data->size; i++){
+			page->data[page->position] = parsed_data->data[i];
+			page->position++;
+		}
+
+		if(page->position == SPM_PAGESIZE)
+			page->ready = 1;
+	}
+	if(parsed_data->operation == 1){
+		page->ready = 1;
+	}
 
 	return 0;
 }

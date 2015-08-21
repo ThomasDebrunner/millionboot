@@ -68,6 +68,7 @@ void set_timeout(){
 }
 
 
+
 /**
  * Writes a page to memory
  */
@@ -80,10 +81,10 @@ void program_page (uint32_t page, uint8_t *buf)
     sreg = SREG;
     cli();
 
-    eeprom_busy_wait ();
+    eeprom_busy_wait();
 
-    boot_page_erase (page);
-    boot_spm_busy_wait ();      /* Wait until the memory is erased. */
+    boot_page_erase(page);
+    boot_spm_busy_wait();      /* Wait until the memory is erased. */
 
     for (i=0; i<SPM_PAGESIZE; i+=2)
     {
@@ -113,7 +114,7 @@ void program_page (uint32_t page, uint8_t *buf)
  */
 int main(){
 
-	uint8_t hex_receive_buffer[INTEL_HEX_MAX_LINE_LENGTH];
+	char hex_receive_buffer[INTEL_HEX_MAX_LINE_LENGTH];
 
 	//Relocate interrupt vector table into boot section
 	uint8_t temp = MCUCR;
@@ -178,7 +179,16 @@ int main(){
 		start_application();
 	}
 
-	TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWSTO)|(1<<TWEA);
+	TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWEA);
+
+	//wait for stop bit
+	while(!(TWCR & (1<<TWINT))){
+		if(timeout_counter <= 0){
+			TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWSTO)|(1<<TWEA);
+			start_application();
+		}
+	}
+
 
 	/**
 	 * Entered firmware upgrade mode
@@ -189,37 +199,56 @@ int main(){
 	TWAR &= ~(1<<TWGCE);	//disable general call
 
 	uint8_t upgrade_finished = 0;
+	uint8_t i;
+	Parseresult result;
+
 	while(!upgrade_finished){
+#if DEBUG
+		uart_send("awaiting hex line\r\n");
+#endif
 		//wait for beginning of next line transmission
 		TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWSTO)|(1<<TWEA);
 		while(!(TWCR & (1<<TWINT)));
 		if(TWSR != TW_SR_SLA_ACK){
-			TWCR = (1<<TWINT)|(1<<TWEN);
 			continue;
 		}
 
-		//receive line
-		uint8_t i;
+		//receive hex-line
 		for(i=0; i<INTEL_HEX_MAX_LINE_LENGTH-1; i++){
+			TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWEA);
 			while(!(TWCR & (1<<TWINT)));
-			if(TWSR == TW_SR_DATA_ACK){
+
+			if(TWSR == TW_SR_DATA_ACK){	//new data
 				hex_receive_buffer[i] = TWDR;
-				if(hex_receive_buffer[i] == '\r')
-					TWCR = (1<<TWINT)|(1<<TWEN);
-				else
-					TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWEA);
+				hex_receive_buffer[i+1] = 0x00;
 			}
-			//revieved whole line
-			if(TWSR == TW_SR_DATA_NACK){
+			if(TWSR == TW_SR_STOP){	//stopbit received
 				break;
 			}
 		}
 
-		uart_send(hex_receive_buffer);
-		uart_send("\r\n");
+		//we got full line just send nack from here on
+		TWCR = (1<<TWINT)|(1<<TWEN);
 
+		//parse the result
+		uint8_t err = hex_parse(hex_receive_buffer, &result);
 
+#if DEBUG
+		uart_send("parsed line. Awaiting write command\r\n");
+#endif
 
+		if(err == 0){
+			//do upgrade
+		}
+
+		// wait for write command
+		while(TWSR != TW_ST_SLA_ACK){
+			TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWEA);
+			while(!(TWCR & (1<<TWINT)));
+		}
+
+		TWDR = err;
+		TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWEA);
 	}
 
 	while(1);
