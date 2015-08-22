@@ -85,6 +85,19 @@ uint8_t hex_parse(char* buffer, Parseresult* result) {
 
 
 
+void page_init(Page* page){
+	//set all bytes to 0xFF;
+	for(page->position = 0; page->position < SPM_PAGESIZE; page->position++){
+		page->data[page->position] = 0xFF;
+	}
+	//set position back to beginning of page
+	page->position = 0;
+	//set address to max (inidicates no address)
+	page->address = 0xFFFF;
+	page->ready = 0;
+}
+
+
 uint8_t page_append(Parseresult* parsed_data, Page* page){
 	if(parsed_data->operation == 0){
 		uint16_t page_address = parsed_data->address - parsed_data->address % SPM_PAGESIZE;
@@ -106,8 +119,12 @@ uint8_t page_append(Parseresult* parsed_data, Page* page){
 		if(page->position == SPM_PAGESIZE)
 			page->ready = 1;
 	}
-	if(parsed_data->operation == 1){
+	else if(parsed_data->operation == 1){
 		page->ready = 1;
+	}
+
+	else{
+		return ILLEGAL_OPERATION;
 	}
 
 	return 0;

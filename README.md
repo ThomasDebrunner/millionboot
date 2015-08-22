@@ -31,6 +31,9 @@ Value		|Interpretation
 101			|The provided data is missing the : starting character
 102			|The provided data is malformatted. E.g. Size does not match
 103			|Checksum failed
+201			|Data could not be written because the page to be written is already full. (There is some serious error!)
+202			|The supplied data does not belong onto the same page. (Data ordering wrong)
+203			|Illegal hex record. The bootloader only supports the *data* (type 0) and *end of file* (type 1) record. Especially the *Start Segment Address Record* (type 3) is **not** supported, which means that every new software has to start at offset `0x0000`
 
 In all of these cases the hex line has to be retransmitted again.
 

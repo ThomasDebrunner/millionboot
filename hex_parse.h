@@ -22,6 +22,7 @@
 
 #define PAGE_FULL 201
 #define WRONG_PAGE 202
+#define ILLEGAL_OPERATION 203
 
 
 /*
@@ -58,6 +59,11 @@ typedef struct {
  */
 uint8_t hex_parse(char* buffer, Parseresult* result);
 
+
+/*
+ * Resets page to empty state
+ */
+void page_init(Page* page);
 
 /**
  * Tries to append a parseresult to a page. otherwise returns error

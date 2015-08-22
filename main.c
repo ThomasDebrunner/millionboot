@@ -72,10 +72,11 @@ void set_timeout(){
 /**
  * Writes a page to memory
  */
-void program_page (uint32_t page, uint8_t *buf)
+void program_page (Page* page)
 {
     uint16_t i;
     uint8_t sreg;
+    uint8_t* buf = page->data;
 
     /* Disable interrupts */
     sreg = SREG;
@@ -83,7 +84,7 @@ void program_page (uint32_t page, uint8_t *buf)
 
     eeprom_busy_wait();
 
-    boot_page_erase(page);
+    boot_page_erase(page->address);
     boot_spm_busy_wait();      /* Wait until the memory is erased. */
 
     for (i=0; i<SPM_PAGESIZE; i+=2)
@@ -92,10 +93,10 @@ void program_page (uint32_t page, uint8_t *buf)
         uint16_t w = *buf++;
         w += (*buf++) << 8;
 
-        boot_page_fill (page + i, w);
+        boot_page_fill (page->address + i, w);
     }
 
-    boot_page_write (page);     /* Store buffer in flash page.		*/
+    boot_page_write (page->address);     /* Store buffer in flash page.		*/
     boot_spm_busy_wait();       /* Wait until the memory is written.*/
 
     /* Reenable RWW-section again. We need this if we want to jump back */
@@ -201,6 +202,8 @@ int main(){
 	uint8_t upgrade_finished = 0;
 	uint8_t i;
 	Parseresult result;
+	Page page;
+	page_init(&page);
 
 	while(!upgrade_finished){
 #if DEBUG
@@ -212,17 +215,19 @@ int main(){
 		if(TWSR != TW_SR_SLA_ACK){
 			continue;
 		}
-
+		uart_send("got start bit");
 		//receive hex-line
 		for(i=0; i<INTEL_HEX_MAX_LINE_LENGTH-1; i++){
 			TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWEA);
 			while(!(TWCR & (1<<TWINT)));
 
 			if(TWSR == TW_SR_DATA_ACK){	//new data
+				uart_send("data");
 				hex_receive_buffer[i] = TWDR;
 				hex_receive_buffer[i+1] = 0x00;
 			}
 			if(TWSR == TW_SR_STOP){	//stopbit received
+				uart_send("got stop bit");
 				break;
 			}
 		}
@@ -233,13 +238,23 @@ int main(){
 		//parse the result
 		uint8_t err = hex_parse(hex_receive_buffer, &result);
 
+		if(err == 0){
+			err = page_append(&result, &page);
+			if(result.operation == 1){	//end program operation
+				upgrade_finished = 1;
+			}
+		}
+
+		if(err == 0){
+			if(page.ready){
+				program_page(&page);
+			}
+		}
+
+
 #if DEBUG
 		uart_send("parsed line. Awaiting write command\r\n");
 #endif
-
-		if(err == 0){
-			//do upgrade
-		}
 
 		// wait for write command
 		while(TWSR != TW_ST_SLA_ACK){
@@ -250,7 +265,9 @@ int main(){
 		TWDR = err;
 		TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWEA);
 	}
-
+#if DEBUG
+		uart_send("upgrade finished");
+#endif
 	while(1);
 }
 
