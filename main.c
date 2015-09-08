@@ -124,7 +124,7 @@ int main(){
 
 #if DEBUG
 	uart_init(9600);
-	uart_send("millionboot loaded.. \r\n");
+	uart_send("millionboot loaded... \r\n");
 	sei();
 #endif
 
@@ -215,19 +215,16 @@ int main(){
 		if(TWSR != TW_SR_SLA_ACK){
 			continue;
 		}
-		uart_send("got start bit");
 		//receive hex-line
 		for(i=0; i<INTEL_HEX_MAX_LINE_LENGTH-1; i++){
 			TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWEA);
 			while(!(TWCR & (1<<TWINT)));
 
 			if(TWSR == TW_SR_DATA_ACK){	//new data
-				uart_send("data");
 				hex_receive_buffer[i] = TWDR;
 				hex_receive_buffer[i+1] = 0x00;
 			}
 			if(TWSR == TW_SR_STOP){	//stopbit received
-				uart_send("got stop bit");
 				break;
 			}
 		}
@@ -248,6 +245,7 @@ int main(){
 		if(err == 0){
 			if(page.ready){
 				program_page(&page);
+				page_init(&page);
 			}
 		}
 
@@ -264,6 +262,8 @@ int main(){
 
 		TWDR = err;
 		TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWEA);
+		//wait for delivery
+		while(!(TWCR & (1<<TWINT)));
 	}
 #if DEBUG
 		uart_send("upgrade finished");

@@ -7,7 +7,6 @@
 
 #include "hex_parse.h"
 
-
 /*
  * Takes an ascii pair and converts it to a byte
  */
@@ -100,14 +99,14 @@ void page_init(Page* page){
 
 uint8_t page_append(Parseresult* parsed_data, Page* page){
 	if(parsed_data->operation == 0){
-		uint16_t page_address = parsed_data->address - parsed_data->address % SPM_PAGESIZE;
+		uint16_t page_address = parsed_data->address - (parsed_data->address % SPM_PAGESIZE);
 		if(page->address == 0xFFFF){ // no address specified yet
 			page->address = page_address;
 		}
 		else if(page->address != page_address)
 			return WRONG_PAGE;
 
-		if(SPM_PAGESIZE-1-page->position < parsed_data->size)
+		if(SPM_PAGESIZE-page->position < parsed_data->size)
 			return PAGE_FULL;
 
 		uint8_t i;
