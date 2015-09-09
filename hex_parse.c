@@ -70,7 +70,7 @@ uint8_t hex_parse(char* buffer, Parseresult* result) {
 	}
 
 	//verify checksum
-	if((int8_t)checksum+(int8_t)ascii_byte_parse(position)){
+	if((uint8_t)((int8_t)checksum+(int8_t)ascii_byte_parse(position))){
 		return CHECKSUM_FAILED;
 	}
 	position += 2;
@@ -84,40 +84,73 @@ uint8_t hex_parse(char* buffer, Parseresult* result) {
 
 
 
-void page_init(Page* page){
+void page_init_zero(Page* page){
 	//set all bytes to 0xFF;
 	for(page->position = 0; page->position < SPM_PAGESIZE; page->position++){
 		page->data[page->position] = 0xFF;
 	}
 	//set position back to beginning of page
 	page->position = 0;
-	//set address to max (inidicates no address)
-	page->address = 0xFFFF;
+	//set address to zero
+	page->address = 0x0000;
 	page->ready = 0;
+}
+
+void page_init_next(Page* page){
+	uint16_t newaddress = page->address + SPM_PAGESIZE;
+	page_init_zero(page);
+	page->address = newaddress;
 }
 
 
 uint8_t page_append(Parseresult* parsed_data, Page* page){
+	uint8_t remaining_bytes = 0;
+	uint8_t i;
 	if(parsed_data->operation == 0){
 		uint16_t page_address = parsed_data->address - (parsed_data->address % SPM_PAGESIZE);
-		if(page->address == 0xFFFF){ // no address specified yet
-			page->address = page_address;
+
+		/*
+		 * Data address does not match expectation. Check if later data indeed fits on page.
+		 * Occurs when data didn't completely fit on previous page
+		 */
+		if(page->address != page_address){
+			if(page->address == page_address+SPM_PAGESIZE){ //the data is partly from previous page and partly from this
+				for(i=0; i<parsed_data->size; i++){
+					if((parsed_data->address+i) < page->address)
+						continue;
+					page->data[page->position] = parsed_data->data[i];
+					page->position++;
+				}
+				return 0;
+			}
+			else
+				return WRONG_PAGE;
 		}
-		else if(page->address != page_address)
-			return WRONG_PAGE;
 
-		if(SPM_PAGESIZE-page->position < parsed_data->size)
-			return PAGE_FULL;
+		/*
+		 * Data address fits page address. Checks if the data will overflow page.
+		 */
+		else {
+			uint8_t bytes_to_copy = parsed_data->size;
+			if(SPM_PAGESIZE-page->position < parsed_data->size){
+				bytes_to_copy = SPM_PAGESIZE-page->position;
+				remaining_bytes = parsed_data->size - bytes_to_copy;
+			}
 
-		uint8_t i;
-		for(i=0; i<parsed_data->size; i++){
-			page->data[page->position] = parsed_data->data[i];
-			page->position++;
+			if(page->address+page->position != parsed_data->address){
+				return WRONG_ORDER;
+			}
+
+			for(i=0; i<bytes_to_copy; i++){
+				page->data[page->position] = parsed_data->data[i];
+				page->position++;
+			}
+
+			if(page->position == SPM_PAGESIZE)
+				page->ready = 1;
 		}
-
-		if(page->position == SPM_PAGESIZE)
-			page->ready = 1;
 	}
+
 	else if(parsed_data->operation == 1){
 		page->ready = 1;
 	}
@@ -126,5 +159,5 @@ uint8_t page_append(Parseresult* parsed_data, Page* page){
 		return ILLEGAL_OPERATION;
 	}
 
-	return 0;
+	return remaining_bytes;
 }

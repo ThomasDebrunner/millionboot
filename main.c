@@ -20,15 +20,13 @@
 #include <util/delay.h>
 #include <util/twi.h>
 #include <avr/eeprom.h>
-#include "io/uart.h"
 #include "hex_parse.h"
 
-#include <stdio.h>
 
 /**
  * CONFIGURATION----------------------
  */
-#define DEBUG 1
+#define DEBUG 0
 #define FIRMWARE_UPDATE_COMMAND 0xAA
 #define INTEL_HEX_MAX_LINE_LENGTH 46
 
@@ -122,12 +120,6 @@ int main(){
 	MCUCR = temp | (1<<IVCE);
 	MCUCR = temp | (1<<IVSEL);
 
-#if DEBUG
-	uart_init(9600);
-	uart_send("millionboot loaded... \r\n");
-	sei();
-#endif
-
 	//load device address from eeprom
 	device_address = eeprom_read_byte(0x00);
 
@@ -143,16 +135,10 @@ int main(){
 	//check if there is something on I2C or timeout expires
 	while(!(TWCR & (1<<TWINT))){
 		if(timeout_counter <= 0){
-#if DEBUG
-			uart_send("No data on I2C. Exiting.. \r\n");
-#endif
 			start_application();
 		}
 	}
 	if(!(TWSR == TW_SR_GCALL_ACK)){
-#if DEBUG
-		uart_send("No general call on I2C. Exiting..  \r\n");
-#endif
 		TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWSTO)|(1<<TWEA);
 		start_application();
 	}
@@ -164,18 +150,12 @@ int main(){
 	//wait for data, or timeout
 	while(!(TWCR & (1<<TWINT))){
 		if(timeout_counter <= 0){
-#if DEBUG
-			uart_send("No command byte on I2C. Exiting.. \r\n");
-#endif
 			TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWSTO)|(1<<TWEA);
 			start_application();
 		}
 	}
 
 	if(!(TWSR == TW_SR_GCALL_DATA_ACK) || TWDR != FIRMWARE_UPDATE_COMMAND){
-#if DEBUG
-		uart_send("Wrong command byte. Exiting.. \r\n");
-#endif
 		TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWSTO)|(1<<TWEA);
 		start_application();
 	}
@@ -194,21 +174,15 @@ int main(){
 	/**
 	 * Entered firmware upgrade mode
 	 */
-#if DEBUG
-	uart_send("entered firmware update mode.. \r\n");
-#endif
 	TWAR &= ~(1<<TWGCE);	//disable general call
 
 	uint8_t upgrade_finished = 0;
 	uint8_t i;
 	Parseresult result;
 	Page page;
-	page_init(&page);
+	page_init_zero(&page);
 
 	while(!upgrade_finished){
-#if DEBUG
-		uart_send("awaiting hex line\r\n");
-#endif
 		//wait for beginning of next line transmission
 		TWCR = (1<<TWINT)|(1<<TWEN)|(1<<TWSTO)|(1<<TWEA);
 		while(!(TWCR & (1<<TWINT)));
@@ -237,22 +211,22 @@ int main(){
 
 		if(err == 0){
 			err = page_append(&result, &page);
+			if(err <= 16 && page.ready){ //this is a full, ok page
+				program_page(&page);
+				page_init_next(&page); //open up new page
+				if(err > 0){ //no error, but not all bytes fittet on page
+					err = page_append(&result, &page);	//write rest onto new page
+					if(page.ready){
+						program_page(&page);
+						page_init_next(&page);
+					}
+				}
+			}
+
 			if(result.operation == 1){	//end program operation
 				upgrade_finished = 1;
 			}
 		}
-
-		if(err == 0){
-			if(page.ready){
-				program_page(&page);
-				page_init(&page);
-			}
-		}
-
-
-#if DEBUG
-		uart_send("parsed line. Awaiting write command\r\n");
-#endif
 
 		// wait for write command
 		while(TWSR != TW_ST_SLA_ACK){
@@ -265,9 +239,6 @@ int main(){
 		//wait for delivery
 		while(!(TWCR & (1<<TWINT)));
 	}
-#if DEBUG
-		uart_send("upgrade finished");
-#endif
 	while(1);
 }
 

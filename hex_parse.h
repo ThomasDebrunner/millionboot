@@ -20,7 +20,7 @@
 #define MALFORMATED 102
 #define CHECKSUM_FAILED 103
 
-#define PAGE_FULL 201
+#define WRONG_ORDER 201
 #define WRONG_PAGE 202
 #define ILLEGAL_OPERATION 203
 
@@ -61,12 +61,20 @@ uint8_t hex_parse(char* buffer, Parseresult* result);
 
 
 /*
- * Resets page to empty state
+ * Resets page to empty state and address to 0x0000
  */
-void page_init(Page* page);
+void page_init_zero(Page* page);
+
+/*
+ * Resets page to empty state and increases address to next page
+ */
+void page_init_next(Page* page);
 
 /**
- * Tries to append a parseresult to a page. otherwise returns error
+ * Appends parseresult to page. If page is full the page_ready flag is set.
+ * If all bytes from parseresult fit in page it returns 0
+ * If not all bytes fit, it returns the amount of remaining bytes (1 .. 16)
+ * If an error occurs, the appropriate errorcode is thrown (>16)
  */
 uint8_t page_append(Parseresult* parsed_data, Page* page);
 
