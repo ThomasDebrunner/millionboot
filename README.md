@@ -1,5 +1,5 @@
 # millionboot - AVR bootloader
-millionboot is a I2C bootloader for the AVR platform./Users/najiji/Dropbox/banabird/Development/Technical Docs/banabird_android_manual.md
+millionboot is a I2C bootloader for the AVR platform.
 
 * Can accept firmware updates over I2C
 * Provides checksum checks on received data
